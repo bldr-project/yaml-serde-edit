@@ -1,0 +1,15 @@
+---
+# header comment
+key1:
+  - item1
+  - item2
+key2: value2   # inline comment
+---
+key1:
+  nested: value1
+key2: value2
+---
+# header comment
+key1:
+  nested: value1
+key2: value2

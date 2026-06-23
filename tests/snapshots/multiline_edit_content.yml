@@ -1,0 +1,19 @@
+---
+# leading comment
+description: |
+  line one
+  line two
+other: keep   # inline on other
+---
+description: |
+  line one
+  line two
+  line three
+other: keep
+---
+# leading comment
+description: |
+  line one
+  line two
+  line three
+other: keep   # inline on other

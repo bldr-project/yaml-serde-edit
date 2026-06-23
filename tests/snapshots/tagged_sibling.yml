@@ -1,0 +1,9 @@
+---
+key1: !tag "value1"
+key2: value2
+---
+key1: !tag "value1"
+key2: value2-updated
+---
+key1: !tag "value1"
+key2: value2-updated

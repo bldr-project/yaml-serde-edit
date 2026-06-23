@@ -1,0 +1,17 @@
+---
+# header comment
+config:
+  key1: value1
+  key2: value2
+other: keep   # inline comment
+---
+config:
+  - item1
+  - item2
+other: keep
+---
+# header comment
+config:
+- item1
+- item2
+other: keep

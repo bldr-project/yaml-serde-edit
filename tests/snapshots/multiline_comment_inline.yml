@@ -1,0 +1,15 @@
+---
+description: |   # inline comment on the block key
+  line one
+  line two
+other: value1
+---
+description: |
+  line one
+  line two
+other: value2
+---
+description: |   # inline comment on the block key
+  line one
+  line two
+other: value2

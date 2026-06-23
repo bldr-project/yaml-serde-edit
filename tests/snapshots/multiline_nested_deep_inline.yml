@@ -1,0 +1,21 @@
+---
+level1:
+  level2:
+    description: |   # deep inline comment
+      deep line one
+      deep line two
+    flag: true
+---
+level1:
+  level2:
+    description: |
+      deep line one
+      deep line two
+    flag: false
+---
+level1:
+  level2:
+    description: |   # deep inline comment
+      deep line one
+      deep line two
+    flag: false

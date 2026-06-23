@@ -1,0 +1,20 @@
+---
+parent:
+  # comment before the nested block
+  description: |
+    nested line one
+    nested line two
+  sibling: value1
+---
+parent:
+  description: |
+    nested line one
+    nested line two
+  sibling: value1-updated
+---
+parent:
+  # comment before the nested block
+  description: |
+    nested line one
+    nested line two
+  sibling: value1-updated

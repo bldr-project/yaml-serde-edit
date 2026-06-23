@@ -1,0 +1,19 @@
+---
+outer:
+  # comment before inner
+  inner:
+    key1: value1
+    key2: value2
+  sibling: keep   # inline on sibling
+---
+outer:
+  inner:
+    - item1
+    - item2
+  sibling: keep
+---
+outer:
+  inner:
+  - item1
+  - item2
+  sibling: keep

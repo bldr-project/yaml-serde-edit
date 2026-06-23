@@ -1,0 +1,29 @@
+---
+# KNOWN LIMITATION: editing a field inside a sequence whose elements are
+# mappings (not scalars) can't be applied in place, so the whole document is
+# rebuilt and inline/nested comments are lost. Only the leading comment block
+# survives. See `reconcile_sequence` in src/lib.rs.
+items:
+  - name: first    # comment on first item
+    value: 1
+  - name: second
+    value: 2
+extra: keep        # inline on a sibling key
+---
+items:
+  - name: first
+    value: 100
+  - name: second
+    value: 2
+extra: keep
+---
+# KNOWN LIMITATION: editing a field inside a sequence whose elements are
+# mappings (not scalars) can't be applied in place, so the whole document is
+# rebuilt and inline/nested comments are lost. Only the leading comment block
+# survives. See `reconcile_sequence` in src/lib.rs.
+items:
+- name: first
+  value: 100
+- name: second
+  value: 2
+extra: keep

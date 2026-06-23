@@ -1,0 +1,22 @@
+---
+# list comment
+items:
+  - item1   # first
+  - item2
+  - item3
+key1: value1
+---
+items:
+  - item1
+  - item2-updated
+  - item3
+  - item4
+key1: value1
+---
+# list comment
+items:
+  - item1   # first
+  - item2-updated
+  - item3
+  - item4
+key1: value1

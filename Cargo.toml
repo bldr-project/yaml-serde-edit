@@ -1,0 +1,21 @@
+[package]
+name = "yaml-serde-edit"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Edit YAML in place, preserving comments and formatting, via a serde Value-tree diff."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/bldr-project/yaml-serde-edit"
+readme = "README.md"
+keywords = ["yaml", "serde", "comments", "config", "edit"]
+categories = ["config", "encoding", "parsing"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_norway = "0.9"
+yaml-edit = "0.2"
+thiserror = "1"
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+tempfile = "3"

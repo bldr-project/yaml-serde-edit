@@ -1,0 +1,17 @@
+---
+# comment before the block
+description: |
+  line one
+  line two
+other: value1
+---
+description: |
+  line one
+  line two
+other: value2
+---
+# comment before the block
+description: |
+  line one
+  line two
+other: value2

@@ -1,0 +1,20 @@
+# Rust build artifacts
+/target
+
+# Lock file is not tracked for a library
+/Cargo.lock
+
+# Backup files from rustfmt
+**/*.rs.bk
+
+# MSVC debug info
+*.pdb
+
+# Coverage
+*.profraw
+*.profdata
+/lcov.info
+
+# Editor / OS cruft
+*.swp
+.DS_Store

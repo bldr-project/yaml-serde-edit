@@ -1,0 +1,11 @@
+---
+# leading comment
+key1: value1   # inline comment
+key2: value2
+---
+key1: value1-updated
+key2: value2
+---
+# leading comment
+key1: value1-updated   # inline comment
+key2: value2

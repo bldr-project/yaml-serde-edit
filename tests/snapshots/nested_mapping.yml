@@ -1,0 +1,14 @@
+---
+parent:
+  # inner comment
+  child1: value1
+  child2: value2
+---
+parent:
+  child1: value1-updated
+  child2: value2
+---
+parent:
+  # inner comment
+  child1: value1-updated
+  child2: value2
