@@ -14,4 +14,4 @@ other: keep
 config:
 - item1
 - item2
-other: keep
+other: keep   # inline comment

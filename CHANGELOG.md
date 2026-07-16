@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Editing or removing a key no longer drops comments from *sibling* sections.
+  When the in-place differ can't apply an edit cleanly (e.g. `yaml-edit` mangles
+  a neighbouring block collection while removing a comment-preceded key), the
+  reconciler now falls back to a per-top-level-section rebuild that keeps every
+  unchanged section's text and comments verbatim, before the last-resort clean
+  rebuild. Previously such edits re-serialized the whole document, losing all
+  comments and reordering keys.
+
 ## [0.1.0] - 2026-06-23
 
 Initial release.

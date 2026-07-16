@@ -30,9 +30,11 @@
 //!   back to disk **atomically** (temp file + rename), still comment-preserving.
 //!
 //! Any edit the in-place differ can't apply cleanly (replacing a block sequence
-//! with a mapping, tagged nodes, non-string keys, …) transparently falls back
-//! to a clean rebuild from the `Value`: comments outside the changed region are
-//! still kept, and the output is **always** value-correct.
+//! with a mapping, tagged nodes, non-string keys, …) transparently falls back —
+//! first to a per-top-level-section rebuild that keeps every unchanged section's
+//! text and comments verbatim, then, only if that still can't reproduce the
+//! value, to a clean rebuild from the `Value`. The output is **always**
+//! value-correct.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -117,30 +119,59 @@ impl YamlValue {
     }
 
     /// Reconcile the edit tree with `self.value`, given the value it held
-    /// `before`. Best-effort in place; falls back to a clean rebuild (keeping
-    /// only the leading comment block) when an edit can't be applied cleanly so
-    /// the result is always value-correct.
+    /// `before`. Tries three strategies in order — a fine-grained in-place edit,
+    /// then a per-top-level-section rebuild (unchanged sections kept verbatim),
+    /// then a clean rebuild from the value — stopping at the first that
+    /// reproduces the value exactly, so the result is always value-correct.
     fn reconcile(&mut self, before: &Value) {
         if *before == self.value {
             return;
         }
 
+        // The document text before any surgical edit, so a failed fine-grained
+        // pass can retry from a pristine, comment-rich copy.
+        let original = self.doc.to_string();
+
+        // 1. Fine-grained: edit each changed key in place, recursing into
+        //    sub-mappings so untouched inner keys keep their comments.
         if let (Some(root), Value::Mapping(old_map), Value::Mapping(new_map)) =
             (self.doc.as_mapping(), before, &self.value)
         {
             apply_mapping(&root, old_map, new_map);
         }
+        if self.round_trips() {
+            return;
+        }
 
-        // If the in-place edit didn't land exactly on the new value — invalid
-        // YAML (e.g. replacing a block sequence), a non-mapping root, non-string
-        // keys, tagged nodes — rebuild cleanly from the value.
-        let in_place_ok = matches!(reparse(&self.doc.to_string()), Ok(v) if v == self.value);
-        if !in_place_ok
-            && let Ok(rebuilt) = serde_norway::to_string(&self.value)
+        // 2. Coarse: the fine-grained edit couldn't be applied cleanly — most
+        //    often because `yaml-edit` can't remove a comment-preceded key (or
+        //    replace a block value) without mangling a neighbouring block
+        //    collection. Re-render only the *top-level* sections that actually
+        //    changed, keeping every unchanged section's text (and comments)
+        //    byte-for-byte — this preserves, say, an untouched `members:` block
+        //    when an `options:` entry is removed.
+        if let (Value::Mapping(old_map), Value::Mapping(new_map)) = (before, &self.value)
+            && let Some(text) = coarse_rebuild(&original, old_map, new_map)
+            && let Ok(doc) = Document::from_str(&text)
+        {
+            self.doc = doc;
+            if self.round_trips() {
+                return;
+            }
+        }
+
+        // 3. Last resort: a clean rebuild from the value (drops comments).
+        if let Ok(rebuilt) = serde_norway::to_string(&self.value)
             && let Ok(doc) = Document::from_str(&rebuilt)
         {
             self.doc = doc;
         }
+    }
+
+    /// Whether the current document re-parses to exactly the target value —
+    /// i.e. the in-place edit landed precisely on it.
+    fn round_trips(&self) -> bool {
+        matches!(reparse(&self.doc.to_string()), Ok(v) if v == self.value)
     }
 }
 
@@ -402,6 +433,100 @@ fn apply_mapping(edit: &EditMapping, old: &Mapping, new: &Mapping) {
             }
         }
     }
+}
+
+/// Rebuild the document text at the granularity of **top-level sections**,
+/// keeping every unchanged section's original text (comments, layout, order)
+/// byte-for-byte and re-rendering only the changed / added ones from the value.
+/// Removed keys are dropped. Returns `None` if a changed value can't be rendered.
+///
+/// This sidesteps `yaml-edit`'s in-tree edits (which mangle block collections
+/// when a neighbouring key is removed or replaced): each section is emitted as
+/// whole text, so touching one can never corrupt another.
+fn coarse_rebuild(original: &str, old: &Mapping, new: &Mapping) -> Option<String> {
+    let sections = split_top_level_sections(original);
+    let mut out: Vec<String> = Vec::new();
+    let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // Original sections, in file order: keep unchanged text, re-render changed,
+    // drop removed.
+    for (key, text) in &sections {
+        let kv = Value::String(key.clone());
+        let Some(new_val) = new.get(&kv) else {
+            continue; // removed
+        };
+        emitted.insert(key.clone());
+        if old.get(&kv) == Some(new_val) {
+            out.push(text.clone());
+        } else {
+            out.push(render_section(key, new_val)?);
+        }
+    }
+    // Keys added in `new` that weren't in the original text: append, in order.
+    for (k, new_val) in new.iter() {
+        if let Some(key) = k.as_str()
+            && !emitted.contains(key)
+        {
+            out.push(render_section(key, new_val)?);
+        }
+    }
+
+    let mut joined = out.join("\n");
+    if !joined.ends_with('\n') {
+        joined.push('\n');
+    }
+    Some(joined)
+}
+
+/// Split a YAML mapping document into its top-level sections, each as
+/// `(key, text)` where `text` covers the key's own leading (column-0) comment /
+/// blank lines plus its whole indented body. Column-0 comment/blank runs attach
+/// to the section that follows them.
+fn split_top_level_sections(text: &str) -> Vec<(String, String)> {
+    let mut sections: Vec<(String, Vec<&str>)> = Vec::new();
+    let mut lead: Vec<&str> = Vec::new();
+    for line in text.lines() {
+        let indented = line.starts_with([' ', '\t']);
+        let trimmed = line.trim_start();
+        if !indented && !trimmed.is_empty() && !trimmed.starts_with('#') {
+            // A top-level key line: `key:` or `key: value`.
+            let key = line
+                .split_once(':')
+                .map(|(k, _)| k.trim())
+                .unwrap_or_else(|| line.trim())
+                .to_string();
+            let mut body = std::mem::take(&mut lead);
+            body.push(line);
+            sections.push((key, body));
+        } else if !indented {
+            // Column-0 comment or blank — buffer for the next section.
+            lead.push(line);
+        } else if let Some((_, body)) = sections.last_mut() {
+            // Indented body of the current section (flushing any buffered
+            // blank/comment lines that belong inside it).
+            body.append(&mut lead);
+            body.push(line);
+        } else {
+            lead.push(line);
+        }
+    }
+    // Trailing comments/blanks attach to the last section.
+    if let Some((_, body)) = sections.last_mut() {
+        body.append(&mut lead);
+    }
+    sections
+        .into_iter()
+        .map(|(k, v)| (k, v.join("\n")))
+        .collect()
+}
+
+/// Render a single `key: value` top-level section as YAML text (no trailing
+/// newline), via `serde_norway`.
+fn render_section(key: &str, value: &Value) -> Option<String> {
+    let mut m = Mapping::new();
+    m.insert(Value::String(key.to_string()), value.clone());
+    let text = serde_norway::to_string(&Value::Mapping(m)).ok()?;
+    Some(text.trim_end_matches('\n').to_string())
 }
 
 /// Reconcile a scalar sequence element-wise (set changed indices, push new

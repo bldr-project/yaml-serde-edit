@@ -26,4 +26,4 @@ items:
   value: 100
 - name: second
   value: 2
-extra: keep
+extra: keep        # inline on a sibling key

@@ -1,0 +1,54 @@
+---
+# Workspace configuration — keep me!
+members:
+  # the build controller image
+  c9:
+    content:
+      kind: r
+      reference: v1
+    tracking:
+      kind: r
+      reference: v2
+      tag: "1"
+  # a path member
+  a1: p1
+  b2: p2
+options:
+  # which members to build
+  t:
+    - a1
+  # a reserved option, removed below
+  bc: identity
+---
+members:
+  a1: p1
+  b2: p2
+  c9:
+    content:
+      kind: r
+      reference: v1
+    tracking:
+      kind: r
+      reference: v2
+      tag: "1"
+options:
+  t:
+    - a1
+---
+# Workspace configuration — keep me!
+members:
+  # the build controller image
+  c9:
+    content:
+      kind: r
+      reference: v1
+    tracking:
+      kind: r
+      reference: v2
+      tag: "1"
+  # a path member
+  a1: p1
+  b2: p2
+options:
+  t:
+  - a1

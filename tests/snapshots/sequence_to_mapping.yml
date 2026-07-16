@@ -12,4 +12,4 @@ key2: value2
 # header comment
 key1:
   nested: value1
-key2: value2
+key2: value2   # inline comment
