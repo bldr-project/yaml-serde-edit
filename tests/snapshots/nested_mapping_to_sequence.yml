@@ -13,7 +13,8 @@ outer:
   sibling: keep
 ---
 outer:
+  # comment before inner
   inner:
-  - item1
-  - item2
-  sibling: keep
+    - item1
+    - item2
+  sibling: keep   # inline on sibling

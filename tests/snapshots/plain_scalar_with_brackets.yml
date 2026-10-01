@@ -1,0 +1,16 @@
+---
+# header comment
+targets:
+- model: a
+  when: request.headers["local"] == "true"
+---
+targets:
+- model: a
+  when: request.headers["local"] == "true"
+- model: b
+---
+# header comment
+targets:
+- model: a
+  when: request.headers["local"] == "true"
+- model: b

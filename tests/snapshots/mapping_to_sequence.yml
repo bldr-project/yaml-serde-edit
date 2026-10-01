@@ -12,6 +12,6 @@ other: keep
 ---
 # header comment
 config:
-- item1
-- item2
+  - item1
+  - item2
 other: keep   # inline comment

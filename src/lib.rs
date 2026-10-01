@@ -87,7 +87,8 @@ impl YamlValue {
     pub fn parse(text: &str) -> Result<Self> {
         let value: Value = serde_norway::from_str(text)?;
         let leading = leading_block(text);
-        let doc = Document::from_str(text).map_err(|e| Error::Edit(e.to_string()))?;
+        let doc =
+            Document::from_str_ignoring_comments(text).map_err(|e| Error::Edit(e.to_string()))?;
         Ok(Self {
             doc,
             leading,
@@ -152,7 +153,7 @@ impl YamlValue {
         //    when an `options:` entry is removed.
         if let (Value::Mapping(old_map), Value::Mapping(new_map)) = (before, &self.value)
             && let Some(text) = coarse_rebuild(&original, old_map, new_map)
-            && let Ok(doc) = Document::from_str(&text)
+            && let Ok(doc) = Document::from_str_ignoring_comments(&text)
         {
             self.doc = doc;
             if self.round_trips() {
@@ -162,7 +163,7 @@ impl YamlValue {
 
         // 3. Last resort: a clean rebuild from the value (drops comments).
         if let Ok(rebuilt) = serde_norway::to_string(&self.value)
-            && let Ok(doc) = Document::from_str(&rebuilt)
+            && let Ok(doc) = Document::from_str_ignoring_comments(&rebuilt)
         {
             self.doc = doc;
         }
@@ -585,7 +586,8 @@ fn node_for(key: &str, value: &Value) -> Result<yaml_edit::YamlNode> {
     let mut wrapper = Mapping::new();
     wrapper.insert(Value::String(key.to_owned()), value.clone());
     let text = serde_norway::to_string(&Value::Mapping(wrapper))?;
-    let doc = Document::from_str(&text).map_err(|e| Error::Edit(e.to_string()))?;
+    let doc =
+        Document::from_str_ignoring_comments(&text).map_err(|e| Error::Edit(e.to_string()))?;
     doc.as_mapping()
         .and_then(|m| m.get(key))
         .ok_or_else(|| Error::Edit(format!("could not build value node for key {key:?}")))
