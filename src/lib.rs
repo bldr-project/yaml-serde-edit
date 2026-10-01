@@ -415,10 +415,8 @@ fn apply_mapping(edit: &EditMapping, old: &Mapping, new: &Mapping) {
                     edit.set(key, node);
                 }
             }
-            // Both scalar sequences → reconcile element-wise so the rest of the
-            // document keeps its comments. (Falls through to a whole-document
-            // rebuild via the caller's round-trip check if an element isn't a
-            // scalar — `yaml_edit` can't cleanly set a nested block node.)
+            // Both sequences → reconcile element-wise so the rest of the
+            // document keeps its comments.
             Some(Value::Sequence(old_seq)) if matches!(new_val, Value::Sequence(_)) => {
                 if let (Some(edit_seq), Value::Sequence(new_seq)) =
                     (edit.get_sequence(key), new_val)
@@ -538,54 +536,32 @@ fn render_section(key: &str, value: &Value) -> Option<String> {
     Some(text.trim_end_matches('\n').to_string())
 }
 
-/// Reconcile a scalar sequence element-wise (set changed indices, push new
-/// tail elements, drop removed tail elements) so the surrounding document keeps
-/// its comments. Returns `false` if any element isn't a scalar — the caller
-/// then rebuilds. A partially-applied result is harmless: the round-trip check
-/// triggers a clean rebuild.
-fn reconcile_sequence(edit: &yaml_edit::Sequence, old: &[Value], new: &[Value]) -> bool {
-    let common = old.len().min(new.len());
-    for (i, nv) in new.iter().enumerate().take(common) {
-        if old[i] != *nv && !set_scalar(edit, i, nv) {
-            return false;
+/// Reconcile a sequence element-wise (recurse into changed mappings, replace
+/// other changed elements, push new tail elements, drop removed tail elements)
+/// so the surrounding document keeps its comments. Best-effort: an element it
+/// can't apply cleanly is caught by the caller's round-trip check, which then
+/// rebuilds.
+fn reconcile_sequence(edit: &yaml_edit::Sequence, old: &[Value], new: &[Value]) {
+    for (i, (ov, nv)) in old.iter().zip(new).enumerate() {
+        if ov == nv {
+            continue;
+        }
+        if let (Value::Mapping(old_sub), Value::Mapping(new_sub)) = (ov, nv)
+            && let Some(edit_sub) = edit.get(i).as_ref().and_then(|n| n.as_mapping())
+        {
+            apply_mapping(edit_sub, old_sub, new_sub);
+        } else if let Ok(node) = node_for("v", nv) {
+            edit.set(i, node);
         }
     }
-    if new.len() > old.len() {
-        for nv in &new[old.len()..] {
-            if !push_scalar(edit, nv) {
-                return false;
-            }
-        }
-    } else {
-        for i in (new.len()..old.len()).rev() {
-            edit.remove(i);
+    for nv in new.iter().skip(old.len()) {
+        if let Ok(node) = node_for("v", nv) {
+            edit.push(node);
         }
     }
-    true
-}
-
-fn set_scalar(edit: &yaml_edit::Sequence, index: usize, value: &Value) -> bool {
-    match value {
-        Value::Bool(b) => edit.set(index, *b),
-        Value::String(s) => edit.set(index, s.clone()),
-        Value::Number(n) if n.is_i64() => edit.set(index, n.as_i64().unwrap()),
-        Value::Number(n) if n.is_u64() => edit.set(index, n.as_u64().unwrap()),
-        Value::Number(n) if n.is_f64() => edit.set(index, n.as_f64().unwrap()),
-        _ => return false,
-    };
-    true
-}
-
-fn push_scalar(edit: &yaml_edit::Sequence, value: &Value) -> bool {
-    match value {
-        Value::Bool(b) => edit.push(*b),
-        Value::String(s) => edit.push(s.clone()),
-        Value::Number(n) if n.is_i64() => edit.push(n.as_i64().unwrap()),
-        Value::Number(n) if n.is_u64() => edit.push(n.as_u64().unwrap()),
-        Value::Number(n) if n.is_f64() => edit.push(n.as_f64().unwrap()),
-        _ => return false,
+    for i in (new.len()..old.len()).rev() {
+        edit.remove(i);
     }
-    true
 }
 
 /// Build a comment-free edit node for `value` (correctly typed/quoted) by
