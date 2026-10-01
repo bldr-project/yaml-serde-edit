@@ -451,17 +451,20 @@ fn coarse_rebuild(original: &str, old: &Mapping, new: &Mapping) -> Option<String
 
     // Original sections, in file order: keep unchanged text, re-render changed,
     // drop removed.
-    for (key, text) in &sections {
+    for (key, lead, body) in &sections {
         let kv = Value::String(key.clone());
         let Some(new_val) = new.get(&kv) else {
             continue; // removed
         };
         emitted.insert(key.clone());
-        if old.get(&kv) == Some(new_val) {
-            out.push(text.clone());
+        let body = if old.get(&kv) == Some(new_val) {
+            body.clone()
         } else {
-            out.push(render_section(key, new_val)?);
-        }
+            render_section(key, new_val)?
+        };
+        // The section's leading comments / blank lines are kept even when its
+        // body is re-rendered.
+        out.push(format!("{lead}{body}"));
     }
     // Keys added in `new` that weren't in the original text: append, in order.
     for (k, new_val) in new.iter() {
@@ -480,14 +483,17 @@ fn coarse_rebuild(original: &str, old: &Mapping, new: &Mapping) -> Option<String
 }
 
 /// Split a YAML mapping document into its top-level sections, each as
-/// `(key, text)` where `text` covers the key's own leading (column-0) comment /
-/// blank lines plus its whole indented body. Column-0 comment/blank runs attach
-/// to the section that follows them.
-fn split_top_level_sections(text: &str) -> Vec<(String, String)> {
-    let mut sections: Vec<(String, Vec<&str>)> = Vec::new();
+/// `(key, lead, body)`: `lead` is the key's own leading (column-0) comment /
+/// blank lines, each newline-terminated, and `body` is the key line plus its
+/// whole body. Column-0 comment/blank runs attach to the section that follows
+/// them.
+fn split_top_level_sections(text: &str) -> Vec<(String, String, String)> {
+    let mut sections: Vec<(String, String, Vec<&str>)> = Vec::new();
     let mut lead: Vec<&str> = Vec::new();
     for line in text.lines() {
-        let indented = line.starts_with([' ', '\t']);
+        // A block sequence may sit at column 0 under its key (`key:\n- item`);
+        // its entries are body, not new keys.
+        let indented = line.starts_with([' ', '\t']) || line == "-" || line.starts_with("- ");
         let trimmed = line.trim_start();
         if !indented && !trimmed.is_empty() && !trimmed.starts_with('#') {
             // A top-level key line: `key:` or `key: value`.
@@ -496,13 +502,15 @@ fn split_top_level_sections(text: &str) -> Vec<(String, String)> {
                 .map(|(k, _)| k.trim())
                 .unwrap_or_else(|| line.trim())
                 .to_string();
-            let mut body = std::mem::take(&mut lead);
-            body.push(line);
-            sections.push((key, body));
+            let lead: String = std::mem::take(&mut lead)
+                .into_iter()
+                .map(|l| format!("{l}\n"))
+                .collect();
+            sections.push((key, lead, vec![line]));
         } else if !indented {
             // Column-0 comment or blank — buffer for the next section.
             lead.push(line);
-        } else if let Some((_, body)) = sections.last_mut() {
+        } else if let Some((_, _, body)) = sections.last_mut() {
             // Indented body of the current section (flushing any buffered
             // blank/comment lines that belong inside it).
             body.append(&mut lead);
@@ -512,12 +520,12 @@ fn split_top_level_sections(text: &str) -> Vec<(String, String)> {
         }
     }
     // Trailing comments/blanks attach to the last section.
-    if let Some((_, body)) = sections.last_mut() {
+    if let Some((_, _, body)) = sections.last_mut() {
         body.append(&mut lead);
     }
     sections
         .into_iter()
-        .map(|(k, v)| (k, v.join("\n")))
+        .map(|(k, lead, body)| (k, lead, body.join("\n")))
         .collect()
 }
 
