@@ -87,7 +87,8 @@ impl YamlValue {
     pub fn parse(text: &str) -> Result<Self> {
         let value: Value = serde_norway::from_str(text)?;
         let leading = leading_block(text);
-        let doc = Document::from_str(text).map_err(|e| Error::Edit(e.to_string()))?;
+        let doc =
+            Document::from_str_ignoring_comments(text).map_err(|e| Error::Edit(e.to_string()))?;
         Ok(Self {
             doc,
             leading,
@@ -152,7 +153,7 @@ impl YamlValue {
         //    when an `options:` entry is removed.
         if let (Value::Mapping(old_map), Value::Mapping(new_map)) = (before, &self.value)
             && let Some(text) = coarse_rebuild(&original, old_map, new_map)
-            && let Ok(doc) = Document::from_str(&text)
+            && let Ok(doc) = Document::from_str_ignoring_comments(&text)
         {
             self.doc = doc;
             if self.round_trips() {
@@ -162,7 +163,7 @@ impl YamlValue {
 
         // 3. Last resort: a clean rebuild from the value (drops comments).
         if let Ok(rebuilt) = serde_norway::to_string(&self.value)
-            && let Ok(doc) = Document::from_str(&rebuilt)
+            && let Ok(doc) = Document::from_str_ignoring_comments(&rebuilt)
         {
             self.doc = doc;
         }
@@ -414,10 +415,8 @@ fn apply_mapping(edit: &EditMapping, old: &Mapping, new: &Mapping) {
                     edit.set(key, node);
                 }
             }
-            // Both scalar sequences → reconcile element-wise so the rest of the
-            // document keeps its comments. (Falls through to a whole-document
-            // rebuild via the caller's round-trip check if an element isn't a
-            // scalar — `yaml_edit` can't cleanly set a nested block node.)
+            // Both sequences → reconcile element-wise so the rest of the
+            // document keeps its comments.
             Some(Value::Sequence(old_seq)) if matches!(new_val, Value::Sequence(_)) => {
                 if let (Some(edit_seq), Value::Sequence(new_seq)) =
                     (edit.get_sequence(key), new_val)
@@ -450,17 +449,20 @@ fn coarse_rebuild(original: &str, old: &Mapping, new: &Mapping) -> Option<String
 
     // Original sections, in file order: keep unchanged text, re-render changed,
     // drop removed.
-    for (key, text) in &sections {
+    for (key, lead, body) in &sections {
         let kv = Value::String(key.clone());
         let Some(new_val) = new.get(&kv) else {
             continue; // removed
         };
         emitted.insert(key.clone());
-        if old.get(&kv) == Some(new_val) {
-            out.push(text.clone());
+        let body = if old.get(&kv) == Some(new_val) {
+            body.clone()
         } else {
-            out.push(render_section(key, new_val)?);
-        }
+            render_section(key, new_val)?
+        };
+        // The section's leading comments / blank lines are kept even when its
+        // body is re-rendered.
+        out.push(format!("{lead}{body}"));
     }
     // Keys added in `new` that weren't in the original text: append, in order.
     for (k, new_val) in new.iter() {
@@ -479,14 +481,17 @@ fn coarse_rebuild(original: &str, old: &Mapping, new: &Mapping) -> Option<String
 }
 
 /// Split a YAML mapping document into its top-level sections, each as
-/// `(key, text)` where `text` covers the key's own leading (column-0) comment /
-/// blank lines plus its whole indented body. Column-0 comment/blank runs attach
-/// to the section that follows them.
-fn split_top_level_sections(text: &str) -> Vec<(String, String)> {
-    let mut sections: Vec<(String, Vec<&str>)> = Vec::new();
+/// `(key, lead, body)`: `lead` is the key's own leading (column-0) comment /
+/// blank lines, each newline-terminated, and `body` is the key line plus its
+/// whole body. Column-0 comment/blank runs attach to the section that follows
+/// them.
+fn split_top_level_sections(text: &str) -> Vec<(String, String, String)> {
+    let mut sections: Vec<(String, String, Vec<&str>)> = Vec::new();
     let mut lead: Vec<&str> = Vec::new();
     for line in text.lines() {
-        let indented = line.starts_with([' ', '\t']);
+        // A block sequence may sit at column 0 under its key (`key:\n- item`);
+        // its entries are body, not new keys.
+        let indented = line.starts_with([' ', '\t']) || line == "-" || line.starts_with("- ");
         let trimmed = line.trim_start();
         if !indented && !trimmed.is_empty() && !trimmed.starts_with('#') {
             // A top-level key line: `key:` or `key: value`.
@@ -495,13 +500,15 @@ fn split_top_level_sections(text: &str) -> Vec<(String, String)> {
                 .map(|(k, _)| k.trim())
                 .unwrap_or_else(|| line.trim())
                 .to_string();
-            let mut body = std::mem::take(&mut lead);
-            body.push(line);
-            sections.push((key, body));
+            let lead: String = std::mem::take(&mut lead)
+                .into_iter()
+                .map(|l| format!("{l}\n"))
+                .collect();
+            sections.push((key, lead, vec![line]));
         } else if !indented {
             // Column-0 comment or blank — buffer for the next section.
             lead.push(line);
-        } else if let Some((_, body)) = sections.last_mut() {
+        } else if let Some((_, _, body)) = sections.last_mut() {
             // Indented body of the current section (flushing any buffered
             // blank/comment lines that belong inside it).
             body.append(&mut lead);
@@ -511,12 +518,12 @@ fn split_top_level_sections(text: &str) -> Vec<(String, String)> {
         }
     }
     // Trailing comments/blanks attach to the last section.
-    if let Some((_, body)) = sections.last_mut() {
+    if let Some((_, _, body)) = sections.last_mut() {
         body.append(&mut lead);
     }
     sections
         .into_iter()
-        .map(|(k, v)| (k, v.join("\n")))
+        .map(|(k, lead, body)| (k, lead, body.join("\n")))
         .collect()
 }
 
@@ -529,54 +536,32 @@ fn render_section(key: &str, value: &Value) -> Option<String> {
     Some(text.trim_end_matches('\n').to_string())
 }
 
-/// Reconcile a scalar sequence element-wise (set changed indices, push new
-/// tail elements, drop removed tail elements) so the surrounding document keeps
-/// its comments. Returns `false` if any element isn't a scalar — the caller
-/// then rebuilds. A partially-applied result is harmless: the round-trip check
-/// triggers a clean rebuild.
-fn reconcile_sequence(edit: &yaml_edit::Sequence, old: &[Value], new: &[Value]) -> bool {
-    let common = old.len().min(new.len());
-    for (i, nv) in new.iter().enumerate().take(common) {
-        if old[i] != *nv && !set_scalar(edit, i, nv) {
-            return false;
+/// Reconcile a sequence element-wise (recurse into changed mappings, replace
+/// other changed elements, push new tail elements, drop removed tail elements)
+/// so the surrounding document keeps its comments. Best-effort: an element it
+/// can't apply cleanly is caught by the caller's round-trip check, which then
+/// rebuilds.
+fn reconcile_sequence(edit: &yaml_edit::Sequence, old: &[Value], new: &[Value]) {
+    for (i, (ov, nv)) in old.iter().zip(new).enumerate() {
+        if ov == nv {
+            continue;
+        }
+        if let (Value::Mapping(old_sub), Value::Mapping(new_sub)) = (ov, nv)
+            && let Some(edit_sub) = edit.get(i).as_ref().and_then(|n| n.as_mapping())
+        {
+            apply_mapping(edit_sub, old_sub, new_sub);
+        } else if let Ok(node) = node_for("v", nv) {
+            edit.set(i, node);
         }
     }
-    if new.len() > old.len() {
-        for nv in &new[old.len()..] {
-            if !push_scalar(edit, nv) {
-                return false;
-            }
-        }
-    } else {
-        for i in (new.len()..old.len()).rev() {
-            edit.remove(i);
+    for nv in new.iter().skip(old.len()) {
+        if let Ok(node) = node_for("v", nv) {
+            edit.push(node);
         }
     }
-    true
-}
-
-fn set_scalar(edit: &yaml_edit::Sequence, index: usize, value: &Value) -> bool {
-    match value {
-        Value::Bool(b) => edit.set(index, *b),
-        Value::String(s) => edit.set(index, s.clone()),
-        Value::Number(n) if n.is_i64() => edit.set(index, n.as_i64().unwrap()),
-        Value::Number(n) if n.is_u64() => edit.set(index, n.as_u64().unwrap()),
-        Value::Number(n) if n.is_f64() => edit.set(index, n.as_f64().unwrap()),
-        _ => return false,
-    };
-    true
-}
-
-fn push_scalar(edit: &yaml_edit::Sequence, value: &Value) -> bool {
-    match value {
-        Value::Bool(b) => edit.push(*b),
-        Value::String(s) => edit.push(s.clone()),
-        Value::Number(n) if n.is_i64() => edit.push(n.as_i64().unwrap()),
-        Value::Number(n) if n.is_u64() => edit.push(n.as_u64().unwrap()),
-        Value::Number(n) if n.is_f64() => edit.push(n.as_f64().unwrap()),
-        _ => return false,
+    for i in (new.len()..old.len()).rev() {
+        edit.remove(i);
     }
-    true
 }
 
 /// Build a comment-free edit node for `value` (correctly typed/quoted) by
@@ -585,7 +570,8 @@ fn node_for(key: &str, value: &Value) -> Result<yaml_edit::YamlNode> {
     let mut wrapper = Mapping::new();
     wrapper.insert(Value::String(key.to_owned()), value.clone());
     let text = serde_norway::to_string(&Value::Mapping(wrapper))?;
-    let doc = Document::from_str(&text).map_err(|e| Error::Edit(e.to_string()))?;
+    let doc =
+        Document::from_str_ignoring_comments(&text).map_err(|e| Error::Edit(e.to_string()))?;
     doc.as_mapping()
         .and_then(|m| m.get(key))
         .ok_or_else(|| Error::Edit(format!("could not build value node for key {key:?}")))

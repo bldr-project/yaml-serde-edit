@@ -13,7 +13,7 @@ categories = ["config", "encoding", "parsing"]
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_norway = "0.9"
-yaml-edit = "0.2"
+yaml-edit = "0.3"
 thiserror = "1"
 
 [dev-dependencies]

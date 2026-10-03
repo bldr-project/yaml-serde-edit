@@ -50,5 +50,7 @@ members:
   a1: p1
   b2: p2
 options:
+  # which members to build
   t:
-  - a1
+    - a1
+  # a reserved option, removed below

@@ -1,0 +1,32 @@
+---
+# header comment
+models:
+- name: a
+  params:
+    key: v
+
+# routes are untouched
+routes:
+- name: r1   # inline
+  path: /a
+---
+models:
+- name: a
+  params:
+    key: v
+- name: b
+routes:
+- name: r1
+  path: /a
+---
+# header comment
+models:
+- name: a
+  params:
+    key: v
+- name: b
+
+# routes are untouched
+routes:
+- name: r1   # inline
+  path: /a
